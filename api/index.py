@@ -204,6 +204,29 @@ def view_all_res():
         res.append(r) 
     return jsonify(res), OK_CODE
 
+#Ver detalhes certa reserva
+@app.route('/reservas/<int:number>', methods=['GET'])
+def view_res_id(number):
+    conn = db_connection()
+    cur = conn.cursor()
+    cur.execute("call detalhes_reserva(%s);",[number])
+    res = [] 
+    for r_tuple in cur.fetchall(): 
+        r = { 
+              "res_id": r_tuple[0],
+              "q_id": r_tuple[1],
+              "u_id": r_tuple[2],
+              "cli_u_id": r_tuple[3],
+              "res_data_reserva": r_tuple[4],
+              "res_data_checkin": r_tuple[5],
+              "res_data_checkout": r_tuple[6],
+              "res_preco_total": r_tuple[7],
+              "res_estado": r_tuple[8],
+              "p_id": r_tuple[9]
+            } 
+        res.append(r) 
+    return jsonify(res), OK_CODE
+    
 #AUDITORIA -- INC
 
 #IMAGENS DO QUARTO
