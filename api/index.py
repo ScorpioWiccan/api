@@ -133,6 +133,76 @@ def check_room_availability():
 #remover quarto... INC INC INC -- sort it out on the db
 
 #RESERVAS -- INC
+#inserir reserva - verificando disponibilidade -- inc
+
+#cancelar reserva -- penalidade
+@app.route('/cancel_res', methods=['POST'])
+def cancel_res():
+    conn = db_connection()
+    cur = conn.cursor()
+    data = request.get_jason()
+    if "p_res_id" not in data or "aumento_perc" not in data:
+        return jsonify({"error": "invalid request"}), BAD_REQUEST_CODE
+    try:
+        cur.execute("call cancelar_reserva(%s,%s);",[data["p_res_id"],data["aumento_perc"]])
+        conn.commit()
+    except Exception as e:
+        d = {"mensagem": str(e)}
+        return jsonify(d), 500
+    finally:
+        cur.close()
+        conn.close()
+    return "Sucesso", OK_CODE
+
+#ver reservas cliente
+@app.route('/view_client_res', methods=['GET'])
+def view_client_res():
+    conn = db_connection()
+    cur = conn.cursor()
+    data = request.get_jason()
+    if "p_cli_u_id" not in data:
+        return jsonify({"error": "invalid request"}), BAD_REQUEST_CODE
+    cur.execute("call ver_reservas_cliente(%s);",[data['p_cli_u_id']])
+    res = [] 
+    for r_tuple in cur.fetchall(): 
+        r = { 
+              "res_id": r_tuple[0],
+              "q_id": r_tuple[1],
+              "u_id": r_tuple[2],
+              "cli_u_id": r_tuple[3],
+              "res_data_reserva": r_tuple[4],
+              "res_data_checkin": r_tuple[5],
+              "res_data_checkout": r_tuple[6],
+              "res_preco_total": r_tuple[7],
+              "res_estado": r_tuple[8],
+              "p_id": r_tuple[9]
+            } 
+        res.append(r) 
+    return jsonify(res), OK_CODE
+
+#admin - ver reservas
+@app.route('/view_all_res', methods=['GET'])
+def view_all_res():
+    conn = db_connection()
+    cur = conn.cursor()
+    data = request.get_jason()
+    cur.execute("call ver_reservas_cliente(%s);",[data['p_cli_u_id']])
+    res = [] 
+    for r_tuple in cur.fetchall(): 
+        r = { 
+              "res_id": r_tuple[0],
+              "q_id": r_tuple[1],
+              "u_id": r_tuple[2],
+              "cli_u_id": r_tuple[3],
+              "res_data_reserva": r_tuple[4],
+              "res_data_checkin": r_tuple[5],
+              "res_data_checkout": r_tuple[6],
+              "res_preco_total": r_tuple[7],
+              "res_estado": r_tuple[8],
+              "p_id": r_tuple[9]
+            } 
+        res.append(r) 
+    return jsonify(res), OK_CODE
 
 #AUDITORIA -- INC
 
