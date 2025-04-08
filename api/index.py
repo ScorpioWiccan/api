@@ -105,12 +105,73 @@ def raise_room_price_per_capacity():
         conn.close()
     return "Sucesso", OK_CODE
 
-#remover quarto... INC INC INC
+#consultar disponibilidade de quarto
+
+@app.route('/check_avail', methods=['GET'])
+def check_room_availability():
+    conn = db_connection() 
+    cur = conn.cursor() 
+    data = request.get_json()
+    if "p_q_id" not in data or "p_res_data_checkin" not in data or "p_res_data_checkout" not in data:
+        return jsonify({"error": "invalid request"}), BAD_REQUEST_CODE
+    try:
+        cur.execute("call verificar_disponibilidade_quarto(%s,%s,%s)",[data["p_q_id"],data["p_res_data_checkin"],data["p_res_data_checkout"]])
+        rooms = [] 
+        for r_tuple in cur.fetchall(): 
+            r = { 
+                "disponivel": r_tuple[0]
+            } 
+            rooms.append(r) 
+        return jsonify(rooms), OK_CODE
+    except Exception as e:
+        d = {"mensagem": str(e)}
+        return jsonify(d), 500
+    finally:
+        cur.close()
+        conn.close()
+
+#remover quarto... INC INC INC -- sort it out on the db
 
 #RESERVAS -- INC
 
 #AUDITORIA -- INC
 
-#IMAGENS DO QUARTO -- INC
+#IMAGENS DO QUARTO
+#inserir imagem
+@app.route('/insert_img', methods=['POST'])
+def insert_img():
+    conn = db_connection()
+    cur = conn.cursor()
+    data = request.get_jason()
+    if "q_id" not in data or "iq_img" not in data:
+        return jsonify({"error": "invalid request"}), BAD_REQUEST_CODE
+    try:
+        cur.execute("call inserir_imagem(%s,%s);",[data["q_id"],data["iq_img"]])
+        conn.commit()
+    except Exception as e:
+        d = {"mensagem": str(e)}
+        return jsonify(d), 500
+    finally:
+        cur.close()
+        conn.close()
+    return "Sucesso", OK_CODE
+#remover imagem
+@app.route('/del_img', methods=['POST'])
+def delete_img():
+    conn = db_connection()
+    cur = conn.cursor()
+    data = request.get_jason()
+    if "iq_id" not in data:
+        return jsonify({"error": "invalid request"}), BAD_REQUEST_CODE
+    try:
+        cur.execute("call remover_imagem(%s);",[data["iq_id"]])
+        conn.commit()
+    except Exception as e:
+        d = {"mensagem": str(e)}
+        return jsonify(d), 500
+    finally:
+        cur.close()
+        conn.close()
+    return "Sucesso", OK_CODE
 
 app.run()
