@@ -1,20 +1,80 @@
 from flask import Flask, jsonify , request
 import psycopg2
+import os
+import jwt
+from datetime import datetime, timedelta
 
 app = Flask(__name__)
+app.config['SECRET_KEY'] = os.environ.get("SECRET")
 
 OK_CODE = 200
 BAD_REQUEST_CODE = 400
 
+
+#token = jwt.encode({'user_id': 2, 'user_bd': 'tarefaA','exp': datetime.utcnow() + timedelta(hours=1)},app.config['SECRET_KEY'], 'HS256')
+token = jwt.encode({'user_id': 3, 'user_bd': 'tarefaB','exp': datetime.utcnow() + timedelta(hours=1)},app.config['SECRET_KEY'], 'HS256')
+
 def db_connection(): 
-    db = psycopg2.connect("host=localhost dbname=hotel_tester2 user=postgres password=123") 
+    db = psycopg2.connect(database=os.environ.get("BD_NAME"),
+        user=os.environ.get("USERNAME"),
+        password=os.environ.get("PASSWORD"),
+        host=os.environ.get("HOST"),
+        port=os.environ.get("PORT")) 
     return db
 
 @app.route("/")
 def welcome():
     return "<p>Welcome to the Black Lotus Resort!</p>"
 
+#REGISTO
+@app.route("/auth/register", methods=["POST"])
+def register():
+  #db connection
+  conn = db_connection()
+  cur = conn.cursor()
+  #parse input data as JSON
+  data = request.get_json()
+
+  #if parameters do not correspond
+  if "u_username" not in data or "u_password" not in data or "u_nome" not in data or "u_contacto" not in data or "u_nif" not in data or "u_nivel_privilegio" not in data:
+    return jsonify({"error": "invalid parameters"}), BAD_REQUEST_CODE
+
+  try:
+    cur.execute("call registar_utilizador(%s,%s,%s,%s,%s,%s);",[data["u_username"], data["u_password"], data["u_nome"], data["u_contacto"], data["u_nif"], data["u_nivel_privilegio"]])
+    user = cur.fetchall()
+    conn.commit()
+  except Exception as e:
+    d = {"mensagem": str(e)}
+    return jsonify(d), 500
+  finally:
+    cur.close()
+    conn.close()
+  
+  return jsonify(user), OK_CODE
+
 #QUARTOS -- INC
+@app.route('/disponibilidade', methods=['POST'])
+def verificar_disponibilidade():
+    conn = db_connection() 
+    cur = conn.cursor() 
+    data = request.get_json()
+    if "p_q_id" not in data or "p_res_data_checkin" not in data or "p_res_data_checkout" not in data:
+        return jsonify({"error": "invalid request"}), BAD_REQUEST_CODE
+    try:
+        cur.execute("select verificar_disponibilidade_quarto(%s,%s,%s);", [data["p_q_id"],data["p_res_data_checkin"],data["p_res_data_checkout"]])
+        disponibilidade = cur.fetchall()
+        conn.commit()
+        data_user=jwt.decode(token, app.config['SECRET_KEY'], algorithms=['HS256'])
+        cur.execute("call inserir_auditoria(%s,%s,%s);",[data_user['user_id'],"Viu Disponibilidade Quarto",data_user['user_bd']])
+        conn.commit()
+    except Exception as e:
+        d = {"mensagem": str(e)}
+        return jsonify(d), 500
+    finally:
+        cur.close()
+        conn.close()
+    return disponibilidade, OK_CODE
+
 @app.route('/view_rooms', methods=['GET'])  
 def view_rooms(): 
     conn = db_connection() 
@@ -105,46 +165,22 @@ def raise_room_price_per_capacity():
         conn.close()
     return "Sucesso", OK_CODE
 
-#consultar disponibilidade de quarto
-
-@app.route('/check_avail', methods=['GET'])
-def check_room_availability():
-    conn = db_connection() 
-    cur = conn.cursor() 
-    data = request.get_json()
-    if "p_q_id" not in data or "p_res_data_checkin" not in data or "p_res_data_checkout" not in data:
-        return jsonify({"error": "invalid request"}), BAD_REQUEST_CODE
-    try:
-        cur.execute("call verificar_disponibilidade_quarto(%s,%s,%s)",[data["p_q_id"],data["p_res_data_checkin"],data["p_res_data_checkout"]])
-        rooms = [] 
-        for r_tuple in cur.fetchall(): 
-            r = { 
-                "disponivel": r_tuple[0]
-            } 
-            rooms.append(r) 
-        return jsonify(rooms), OK_CODE
-    except Exception as e:
-        d = {"mensagem": str(e)}
-        return jsonify(d), 500
-    finally:
-        cur.close()
-        conn.close()
-
-#remover quarto... INC INC INC -- sort it out on the db
+#remover quarto... INC INC INC -- maybe add an attribute "q_removido" that could be true or false
 
 #RESERVAS -- INC
-#inserir reserva - verificando disponibilidade -- inc
-
-#cancelar reserva -- penalidade
-@app.route('/cancel_res', methods=['POST'])
-def cancel_res():
+#Criar Nova Reserva -- ENUNCIADO
+@app.route('/reservas', methods=['POST'])
+def inserir_reserva():
     conn = db_connection()
     cur = conn.cursor()
-    data = request.get_jason()
-    if "p_res_id" not in data or "aumento_perc" not in data:
+    data = request.get_json()
+    if "p_q_id" not in data or "p_u_id" not in data or "p_cli_u_id" not in data or "p_res_data_checkin" not in data or "p_res_data_checkout" not in data or "p_res_preco_total" not in data:
         return jsonify({"error": "invalid request"}), BAD_REQUEST_CODE
     try:
-        cur.execute("call cancelar_reserva(%s,%s);",[data["p_res_id"],data["aumento_perc"]])
+        cur.execute("call inserir_reserva(%s,%s,%s,%s,%s,%s)",[data["p_q_id"],data["p_u_id"],data["p_cli_u_id"],data["p_res_data_checkin"],data["p_res_data_checkout"],data["p_res_preco_total"]])
+        conn.commit()
+        data_user=jwt.decode(token, app.config['SECRET_KEY'], algorithms=['HS256'])
+        cur.execute("call inserir_auditoria(%s,%s,%s)",[data_user['user_id'],"Inseriou Reserva",data_user['user_bd']])
         conn.commit()
     except Exception as e:
         d = {"mensagem": str(e)}
@@ -154,110 +190,58 @@ def cancel_res():
         conn.close()
     return "Sucesso", OK_CODE
 
-#ver reservas cliente
-@app.route('/view_client_res', methods=['GET'])
-def view_client_res():
+#Consultar Detalhes de uma Reserva -- ENUNCIADO -- check if this is how it is done, the int in the thingy -- check class exercises
+@app.route('/reservas/<int:id>', methods=['GET'])
+def consultar_reserva(id):
     conn = db_connection()
     cur = conn.cursor()
-    data = request.get_jason()
-    if "p_cli_u_id" not in data:
-        return jsonify({"error": "invalid request"}), BAD_REQUEST_CODE
-    cur.execute("call ver_reservas_cliente(%s);",[data['p_cli_u_id']])
-    res = [] 
+    cur.execute("SELECT * FROM view_reserva WHERE res_id=%s;",[id]) 
+    rs = [] 
     for r_tuple in cur.fetchall(): 
         r = { 
-              "res_id": r_tuple[0],
-              "q_id": r_tuple[1],
-              "u_id": r_tuple[2],
-              "cli_u_id": r_tuple[3],
-              "res_data_reserva": r_tuple[4],
-              "res_data_checkin": r_tuple[5],
-              "res_data_checkout": r_tuple[6],
-              "res_preco_total": r_tuple[7],
-              "res_estado": r_tuple[8],
-              "p_id": r_tuple[9]
-            } 
-        res.append(r) 
-    return jsonify(res), OK_CODE
-
-#admin - ver reservas
-@app.route('/view_all_res', methods=['GET'])
-def view_all_res():
-    conn = db_connection()
-    cur = conn.cursor()
-    data = request.get_jason()
-    cur.execute("call ver_reservas_cliente(%s);",[data['p_cli_u_id']])
-    res = [] 
-    for r_tuple in cur.fetchall(): 
-        r = { 
-              "res_id": r_tuple[0],
-              "q_id": r_tuple[1],
-              "u_id": r_tuple[2],
-              "cli_u_id": r_tuple[3],
-              "res_data_reserva": r_tuple[4],
-              "res_data_checkin": r_tuple[5],
-              "res_data_checkout": r_tuple[6],
-              "res_preco_total": r_tuple[7],
-              "res_estado": r_tuple[8],
-              "p_id": r_tuple[9]
-            } 
-        res.append(r) 
-    return jsonify(res), OK_CODE
-
-#Ver detalhes certa reserva
-@app.route('/reservas/<int:number>', methods=['GET'])
-def view_res_id(number):
-    conn = db_connection()
-    cur = conn.cursor()
-    cur.execute("call detalhes_reserva(%s);",[number])
-    res = [] 
-    for r_tuple in cur.fetchall(): 
-        r = { 
-              "res_id": r_tuple[0],
-              "q_id": r_tuple[1],
-              "u_id": r_tuple[2],
-              "cli_u_id": r_tuple[3],
-              "res_data_reserva": r_tuple[4],
-              "res_data_checkin": r_tuple[5],
-              "res_data_checkout": r_tuple[6],
-              "res_preco_total": r_tuple[7],
-              "res_estado": r_tuple[8],
-              "p_id": r_tuple[9]
-            } 
-        res.append(r) 
-    return jsonify(res), OK_CODE
+            "res_id": r_tuple[0], 
+            "q_id": r_tuple[1], 
+            "u_id": r_tuple[2],
+            "cli_u_id": r_tuple[3],
+            "res_data_reserva": r_tuple[4],
+            "res_data_checkin": r_tuple[5],
+            "res_data_checkout": r_tuple[6],
+            "res_preco_total": r_tuple[7],
+            "res_estado": r_tuple[8],
+            "p_id": r_tuple[9]
+        } 
+        rs.append(r) 
+    return jsonify(rs), OK_CODE
     
+#Cancelar Uma Reserva, Aplicando Regras de negócio -- ENUNCIADO -- work on this one
+@app.route('/reservas/<int:id>', methods=['POST'])
+def cancelar_reserva(id):
+    conn = db_connection()
+    cur = conn.cursor()
+    try:
+        cur.execute("call cancelar_reserva(%s,10)",[id])
+        conn.commit()
+    except Exception as e:
+        d = {"mensagem": str(e)}
+        return jsonify(d), 500
+    finally:
+        cur.close()
+        conn.close()
+    return "Sucesso", OK_CODE
+
 #AUDITORIA -- INC
 
-#IMAGENS DO QUARTO
-#inserir imagem
-@app.route('/insert_img', methods=['POST'])
-def insert_img():
+#IMAGENS DO QUARTO -- INC
+#Upload de imagens dos quartos -- ENUNCIADO
+@app.route('/upload-imagem', methods=['POST'])
+def upload_imagem():
     conn = db_connection()
     cur = conn.cursor()
-    data = request.get_jason()
-    if "q_id" not in data or "iq_img" not in data:
+    data = request.get_json()
+    if "p_q_id" not in data or "p_img_b64" not in data:
         return jsonify({"error": "invalid request"}), BAD_REQUEST_CODE
     try:
-        cur.execute("call inserir_imagem(%s,%s);",[data["q_id"],data["iq_img"]])
-        conn.commit()
-    except Exception as e:
-        d = {"mensagem": str(e)}
-        return jsonify(d), 500
-    finally:
-        cur.close()
-        conn.close()
-    return "Sucesso", OK_CODE
-#remover imagem
-@app.route('/del_img', methods=['POST'])
-def delete_img():
-    conn = db_connection()
-    cur = conn.cursor()
-    data = request.get_jason()
-    if "iq_id" not in data:
-        return jsonify({"error": "invalid request"}), BAD_REQUEST_CODE
-    try:
-        cur.execute("call remover_imagem(%s);",[data["iq_id"]])
+        cur.execute("call inserir_imagem(%s,%s)",[data["p_q_id"],data["p_img_b64"]])
         conn.commit()
     except Exception as e:
         d = {"mensagem": str(e)}
@@ -267,4 +251,47 @@ def delete_img():
         conn.close()
     return "Sucesso", OK_CODE
 
-app.run()
+#Recuperar Imagens de um quarto
+@app.route('/quartos/<int:id>/imagem', methods=['GET'])
+def ver_imagens(id):
+    conn = db_connection()
+    cur = conn.cursor()
+    cur.execute("SELECT * FROM view_imagens_quarto WHERE q_id=%s;",[id]) 
+    rs = [] 
+    for r_tuple in cur.fetchall(): 
+        r = { 
+            "iq_id": r_tuple[0],
+            "q_id": r_tuple[1], 
+            "iq_img": r_tuple[2]
+        } 
+        rs.append(r) 
+    return jsonify(rs), OK_CODE
+
+
+
+#inserir pagamento
+@app.route("/pagamento", methods = ["POST"])
+def pagamento():
+    conn = db_connection()
+    cur = conn.cursor()
+    data = request.get_json()
+    if "p_r_id" not in data or "p_p_metodo" not in data:
+        return jsonify({"error": "invalid request"}), BAD_REQUEST_CODE
+    try:
+        cur.execute("call inserir_pagamento(%s,%s)",[data["p_r_id"],data["p_p_metodo"]])
+        conn.commit()
+        data_user=jwt.decode(token, app.config['SECRET_KEY'], algorithms=['HS256'])
+        cur.execute("call inserir_auditoria(%s,%s,%s)",[data_user['user_id'],"Pagou Reserva",data_user['user_bd']])
+        conn.commit()
+    except Exception as e:
+        d = {"mensagem": str(e)}
+        return jsonify(d), 500
+    finally:
+        cur.close()
+        conn.close()
+    return "Sucesso", OK_CODE
+
+
+
+if __name__ == "__main__":
+    app.run()
